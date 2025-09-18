@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Haptic Array Control – Simulator (v2.5)</title>
+<style>
+  :root{ --bg:#0f172a; --panel:#111827; --muted:#94a3b8; --accent:#22d3ee; --ok:#10b981; --warn:#f59e0b; --danger:#ef4444; }
+  html,body{height:100%}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,'Noto Sans',sans-serif;background:var(--bg);color:#e5e7eb}
+  .wrap{display:grid;grid-template-columns:420px 1fr;gap:16px;max-width:1300px;margin:24px auto;padding:0 16px}
+  .card{background:var(--panel);border:1px solid #1f2937;border-radius:14px;padding:14px;box-shadow:0 4px 30px rgba(0,0,0,.25)}
+  h1{font-size:20px;margin:4px 0 14px 0} h2{font-size:16px;margin:12px 0 8px 0;color:#cbd5e1}
+  label{font-size:13px;color:#cbd5e1}
+  input[type=number],select,button,input[type=text],textarea{background:#0b1220;color:#e5e7eb;border:1px solid #233044;border-radius:10px;padding:8px 10px;font-size:14px}
+  input[type=range]{width:100%} textarea{width:100%;min-height:90px;resize:vertical}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap} .row>*{flex:1} .tight>*{flex:unset}
+  .btn{cursor:pointer;padding:8px 12px;border-radius:10px;border:1px solid #273142;background:#0b1220}
+  .btn:hover{border-color:#365170}.btn-primary{background:linear-gradient(180deg,#103049,#0a2031);border-color:#2bb6cc}
+  .btn-danger{background:linear-gradient(180deg,#3a0c10,#260608);border-color:#f87171}
+  .btn-warn{background:linear-gradient(180deg,#4a3708,#2d2105);border-color:#f59e0b}
+  .grid{display:grid;grid-template-columns:repeat(13, 26px);grid-auto-rows:26px;gap:4px;justify-content:flex-start}
+  .cell{border-radius:6px;background:#0b1220;border:1px solid #1f2c3a;position:relative;display:flex;align-items:center;justify-content:center;font-size:10px;color:#6b7280;user-select:none}
+  .cell.valid::after{content:"";width:10px;height:10px;border-radius:50%;background:#334155}
+  .cell.valid.highlight::after{background:var(--accent);box-shadow:0 0 12px var(--accent)}
+  .cell.valid.on::after{background:#60a5fa;box-shadow:0 0 6px #60a5fa}
+  .cell.valid.sel{outline:2px solid #f59e0b}
+  .muted{color:var(--muted)}
+  .log{height:260px;overflow:auto;background:#0b1220;border:1px solid #233044;border-radius:10px;padding:8px;font-family:ui-monospace,Consolas,Menlo,monospace;font-size:12px;white-space:pre}
+  .pill{padding:4px 8px;border-radius:999px;border:1px solid #233044;background:#0b1220;font-size:12px}
+  .status-dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px;background:#475569}
+  .status-dot.ok{background:var(--ok)} .status-dot.warn{background:var(--warn)}
+  .kbd{border:1px solid #334155;background:#0b1220;border-radius:6px;padding:2px 6px;font-family:ui-monospace,Consolas,Menlo,monospace}
+  .grid-legend{font-size:12px;margin-top:6px;color:#9ca3af}
+  .bar{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .rightcol{display:grid;grid-template-rows:auto auto 1fr;gap:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card" id="left">
+    <div class="bar">
+      <h1>Haptic Array Control – <span class="muted">Simulator v2.5</span></h1>
+      <button class="btn btn-danger" id="btnStopTop">E‑Stop (ESC)</button>
+    </div>
+
+    <h2>Connection</h2>
+    <div class="row tight" style="gap:6px">
+      <label>Transport</label>
+      <select id="transport">
+        <option value="sim">Simulated device (default)</option>
+        <option value="webserial">WebSerial (Chrome/Edge)</option>
+      </select>
+      <button class="btn" id="btnConnect">Connect</button>
+      <span id="connState" class="pill"><span class="status-dot" id="stateDot"></span>Disconnected</span>
+    </div>
+
+    <h2>Pump</h2>
+    <div class="row">
+      <label style="min-width:92px" title="泵占空比(0..255)">Duty: <span id="dutyVal">180</span></label>
+      <input type="range" id="duty" min="0" max="255" value="180"/>
+      <button class="btn" id="btnSetDuty">Apply</button>
+      <span class="muted">limit: <span id="dutyLimit">240</span></span>
+    </div>
+    <div class="row">
+      <label style="min-width:92px" title="泵PWM频率(Hz)">PWM Freq (Hz)</label>
+      <input type="number" id="pfreq" value="20000" min="100" max="30000" step="100"/>
+      <button class="btn" id="btnSetPFreq">Apply</button>
+    </div>
+
+    <h2>Scan (line)</h2>
+    <div class="row">
+      <select id="scanDir">
+        <option value="lr">Left → Right</option>
+        <option value="rl">Right → Left</option>
+        <option value="ud">Up → Down</option>
+        <option value="du">Down → Up</option>
+      </select>
+      <label title="一次点亮相邻的列/行数量">width <input type="number" id="scanWidth" value="1" min="1" max="5" style="width:72px"></label>
+      <label title="vf = 每一步中阀门开关次数；vf=0 表示该步常亮">vf <input type="number" id="scanVf" value="3" min="0" max="10" style="width:72px"></label>
+      <label title="lp = 每秒完成的整圈次数(Hz)；1/lp 秒走完整个扫描">lp (Hz) <input type="number" id="scanLp" value="1.5" min="0.1" step="0.1" style="width:92px"></label>
+      <label>loops <input type="number" id="scanLoops" value="0" min="0" step="1" style="width:72px" title="0 = 无限循环"></label>
+    </div>
+    <div class="row tight" style="gap:6px">
+      <button class="btn btn-primary" id="btnStartScan">Start Scan</button>
+      <button class="btn" id="btnScanOnce">1 Loop</button>
+      <button class="btn btn-warn" id="btnPresetScan">Preset: LR strong</button>
+    </div>
+
+    <h2>Circle</h2>
+    <div class="row">
+      <select id="circleDir">
+        <option value="cw">Clockwise</option>
+        <option value="ccw">Counter‑clockwise</option>
+      </select>
+      <label>outer ring only <input type="checkbox" id="outerOnly"/></label>
+      <label title="沿路径一次点亮的连续点数量">length <input type="number" id="circleLen" value="1" min="1" max="8" style="width:72px"></label>
+      <label title="厚度；Chebyshev 半径，1=仅当前点">width <input type="number" id="circleWidth" value="1" min="1" max="3" style="width:72px"></label>
+      <label title="vf = 每一步中阀门开关次数；vf=0 表示该步常亮">vf <input type="number" id="circleVf" value="2" min="0" max="10" style="width:72px"></label>
+      <label title="lp = 每秒完成的整圈次数(Hz)；1/lp 秒转一圈">lp (Hz) <input type="number" id="circleLp" value="1.0" min="0.1" step="0.1" style="width:92px"></label>
+      <label>loops <input type="number" id="circleLoops" value="0" min="0" step="1" style="width:72px"></label>
+    </div>
+    <div class="row tight" style="gap:6px">
+      <button class="btn btn-primary" id="btnStartCircle">Start Circle</button>
+      <button class="btn" id="btnCircleOnce">1 Loop</button>
+      <button class="btn btn-warn" id="btnPresetCircle">Preset: CW 1Hz</button>
+      <button class="btn" id="btnAllOff">All off</button>
+    </div>
+
+    <h2>Manual / Mask</h2>
+    <div class="row tight" style="gap:6px">
+      <span class="muted">Click cells to select. Selected: <span id="selCount">0</span></span>
+      <button class="btn" id="btnMaskOn">ON</button>
+      <button class="btn" id="btnMaskBlink">Blink</button>
+      <button class="btn" id="btnMaskClear">Clear</button>
+    </div>
+
+    <h2>Ripple (扩散/收缩)</h2>
+    <div class="row">
+      <select id="rippleDir">
+        <option value="out">Outward (扩散)</option>
+        <option value="in">Inward (收缩)</option>
+      </select>
+      <label title="一次点亮连续几层半径环">band (rings) <input type="number" id="rippleBand" value="1" min="1" max="4" style="width:92px"></label>
+      <label title="vf = 每一步中阀门开关次数；vf=0 表示该步常亮">vf <input type="number" id="rippleVf" value="1" min="0" max="10" style="width:72px"></label>
+      <label title="lp = 每秒完成完整的中心→边缘→中心周期">lp (Hz) <input type="number" id="rippleLp" value="0.8" min="0.1" step="0.1" style="width:92px"></label>
+      <label>loops <input type="number" id="rippleLoops" value="0" min="0" step="1" style="width:72px"></label>
+    </div>
+    <div class="row tight" style="gap:6px">
+      <button class="btn btn-primary" id="btnStartRipple">Start Ripple</button>
+      <button class="btn" id="btnRippleOnce">1 Pass</button>
+    </div>
+
+    <h2>Config (matrix JSON)</h2>
+    <div class="row">
+      <textarea id="cfgMatrix" spellcheck="false"></textarea>
+    </div>
+    <div class="row tight" style="gap:6px">
+      <button class="btn" id="btnLoadCfg">Load</button>
+      <button class="btn" id="btnResetCfg">Reset</button>
+      <span class="muted">Edits persist in localStorage</span>
+    </div>
+
+    <h2>Log</h2>
+    <div class="row tight" style="gap:6px;justify-content:flex-end;margin-bottom:6px">
+      <span class="muted">pulse jitter: <span id="jitterNow">—</span> (mean±sd, ms)</span>
+      <button class="btn" id="btnClear">Clear</button>
+      <button class="btn" id="btnCopy">Copy</button>
+      <button class="btn" id="btnSave">Save .txt</button>
+    </div>
+    <div class="log" id="log"></div>
+    <div class="grid-legend">TIP: vf = 每步脉冲次数；lp = 每秒循环次数。改了参数需要点 Start 重新启动该模式。按 <span class="kbd">ESC</span> 急停。</div>
+  </div>
+
+  <div class="rightcol">
+    <div class="card">
+      <h2>Array (13×13, 25 active points)</h2>
+      <div id="grid" class="grid"></div>
+      <div style="margin-top:10px" class="muted">Activated point visualization：青色为当前步骤，高亮蓝色为正在通电的点；橙色边框为手动选择。</div>
+    </div>
+    <div class="card">
+      <h2>Status</h2>
+      <div class="row"><span>Mode:</span><span id="modeLbl" class="pill">IDLE</span></div>
+      <div class="row"><span>Step:</span><span id="stepLbl" class="pill">—</span></div>
+      <div class="row"><span>Brush width:</span><span id="bwLbl" class="pill">1</span></div>
+    </div>
+    <div class="card">
+      <h2>Notes</h2>
+      <div class="muted">WebSerial 模式会把同样的帧写到串口；计时仍在主机端执行。生产建议把时序下沉到 MCU。</div>
+    </div>
+  </div>
+</div>
+<script>
+// ====== constants & defaults ======
+const HDR=0xAA, TAIL=0xBB;
+const CMD={PUMP_DUTY:0x10,PUMP_FREQ:0x11,RELAY_SET_ONE:0x20,RELAY_MASK:0x21,RELAY_ALL:0x23};
+const MATRIX_DEFAULT=[
+[0,0,0,0,0,0,0,0,0,0,0,0,0],
+[0,0,0,1,0,0,0,0,0,1,0,0,0],
+[0,0,0,0,0,0,1,0,0,0,0,0,0],
+[0,0,0,0,1,0,0,0,1,0,0,0,0],
+[0,0,0,0,0,0,0,0,0,0,0,0,0],
+[0,0,0,1,0,1,0,1,0,1,0,0,0],
+[1,0,1,0,1,0,1,0,1,0,1,0,1],
+[0,0,0,1,0,1,0,1,0,1,0,0,0],
+[0,0,0,0,0,0,0,0,0,0,0,0,0],
+[0,0,0,0,1,0,0,0,1,0,0,0,0],
+[0,0,0,0,0,0,1,0,0,0,0,0,0],
+[0,0,0,1,0,0,0,0,0,1,0,0,0],
+[0,0,0,0,0,0,0,0,0,0,0,0,0],];
+
+// ====== state ======
+let MATRIX=JSON.parse(JSON.stringify(MATRIX_DEFAULT));
+let H=MATRIX.length, W=MATRIX[0].length;
+let POS2CH=new Map(), CH2POS=new Map();
+let COL_STEPS=[], ROW_STEPS=[];
+let CW_ORDER=[], CCW_ORDER=[], CW_HULL=[], CCW_HULL=[];
+let RINGS=[]; // arrays of ch by radius
+let cellEls=[], selected=new Set();
+
+// ====== utils ======
+function u8(...xs){return Uint8Array.from(xs)}
+function le16(n){return u8(n&0xFF,(n>>8)&0xFF)}
+function le32(n){return u8(n&0xFF,(n>>8)&0xFF,(n>>16)&0xFF,(n>>24)&0xFF)}
+function hex(buf){return Array.from(buf).map(b=>b.toString(16).padStart(2,'0')).join(' ')}
+function uniq(a){return Array.from(new Set(a))}
+function debounce(fn, wait){ let t=null; return (...args)=>{ if(t) clearTimeout(t); t=setTimeout(()=>fn(...args), wait); }; }
+function readNum(id){ let s=String((byId(id).value??'')).trim(); s=s.replace(/，/g,'.').replace(/,/g,'.'); const v=parseFloat(s); return (isFinite(v)? v : 0); }
+
+// ====== mapping & geometry ======
+function rebuildMaps(){
+  POS2CH=new Map(); CH2POS=new Map(); let ch=0;
+  for(let r=0;r<H;r++) for(let c=0;c<W;c++) if(MATRIX[r][c]){ POS2CH.set(r+","+c,ch); CH2POS.set(ch,[r,c]); ch++; }
+  if(ch!==25) console.warn('Expect 25 points, got', ch);
+  COL_STEPS=Array.from({length:W},()=>[]); ROW_STEPS=Array.from({length:H},()=>[]);
+  for(let r=0;r<H;r++) for(let c=0;c<W;c++) if(MATRIX[r][c]){ const ch=POS2CH.get(r+","+c); ROW_STEPS[r].push(ch); COL_STEPS[c].push(ch); }
+  computeCircleOrders(); computeRings();
+}
+function computeCircleOrders(){
+  const CY=(H-1)/2, CX=(W-1)/2; const byAngle=[];
+  for(const [ch,[r,c]] of CH2POS){ let dx=c-CX, dy=r-CY; let th=Math.atan2(-dy,dx); if(th<0) th+=Math.PI*2; byAngle.push({th,ch}); }
+  byAngle.sort((a,b)=>a.th-b.th); const ccw=byAngle.map(e=>e.ch); CCW_ORDER=ccw; CW_ORDER=[...ccw].reverse();
+  // convex hull (monotonic chain)
+  const pts=[]; for(const [ch,[r,c]] of CH2POS){ pts.push({x:c,y:r,ch}); }
+  pts.sort((a,b)=>a.x===b.x? a.y-b.y : a.x-b.x);
+  function cross(o,a,b){ return (a.x-o.x)*(b.y-o.y)-(a.y-o.y)*(b.x-o.x); }
+  const lower=[]; for(const p of pts){ while(lower.length>=2 && cross(lower[lower.length-2],lower[lower.length-1],p)<=0) lower.pop(); lower.push(p); }
+  const upper=[]; for(let i=pts.length-1;i>=0;i--){ const p=pts[i]; while(upper.length>=2 && cross(upper[upper.length-2],upper[upper.length-1],p)<=0) upper.pop(); upper.push(p); }
+  const hull=lower.slice(0,-1).concat(upper.slice(0,-1)); CCW_HULL=hull.map(p=>p.ch); CW_HULL=[...CCW_HULL].reverse();
+}
+function computeRings(){
+  const CY=(H-1)/2, CX=(W-1)/2; const map=new Map();
+  for(const [ch,[r,c]] of CH2POS){ const dx=c-CX, dy=r-CY; const d2=dx*dx+dy*dy; if(!map.has(d2)) map.set(d2,[]); map.get(d2).push(ch); }
+  const keys=[...map.keys()].sort((a,b)=>a-b); RINGS=keys.map(k=>map.get(k));
+}
+
+// ====== DOM ======
+const gridEl=document.getElementById('grid');
+const logEl=document.getElementById('log');
+const stateDot=document.getElementById('stateDot');
+const connState=document.getElementById('connState');
+
+// ====== grid ======
+function rebuildGrid(){
+  gridEl.innerHTML=''; cellEls=[]; selected.clear(); updateSelCount();
+  for(let r=0;r<H;r++) for(let c=0;c<W;c++){
+    const div=document.createElement('div'); div.className='cell'+(MATRIX[r][c]?' valid':'');
+    if(MATRIX[r][c]){ const ch=POS2CH.get(r+","+c); div.title=`r${r},c${c}, ch ${ch}`; div.dataset.ch=String(ch); div.addEventListener('click',()=>toggleSelect(div)); }
+    gridEl.appendChild(div); cellEls.push(div);
+  }
+}
+function toggleSelect(el){ const ch=parseInt(el.dataset.ch); if(selected.has(ch)){ selected.delete(ch); el.classList.remove('sel'); } else { selected.add(ch); el.classList.add('sel'); } updateSelCount(); }
+function updateSelCount(){ document.getElementById('selCount').textContent=String(selected.size); }
+function highlight(chs){ cellEls.forEach(el=>el.classList.remove('highlight','on')); chs.forEach(ch=>{ for(const el of cellEls){ if(el.dataset.ch===String(ch)){ el.classList.add('highlight'); break; } } }); }
+function showOn(maskOn){ for(const el of cellEls){ const ch=el.dataset.ch; if(ch==null) continue; const bit=(maskOn>>>0) & (1<<parseInt(ch)); if(bit){ el.classList.add('on'); } else { el.classList.remove('on'); } } }
+
+// ====== logging ======
+function log(s){ const ts=new Date().toLocaleTimeString(); logEl.textContent += `[${ts}] ${s}
+`; logEl.scrollTop = logEl.scrollHeight; }
+
+// ====== transport ======
+let port=null, writer=null, transportMode='sim';
+function setConn(ok){ stateDot.classList.toggle('ok', ok); connState.innerHTML = `<span class="status-dot ${ok?'ok':''}"></span>${ok?('Connected ('+transportMode+')'):'Disconnected'}`; }
+async function connect(){ transportMode = document.getElementById('transport').value; if(transportMode==='webserial'){ if(!('serial' in navigator)){ log('WebSerial not supported; fallback to simulation.'); transportMode='sim'; setConn(true); return; } try{ port = await navigator.serial.requestPort(); await port.open({ baudRate: 115200 }); writer = port.writable.getWriter(); setConn(true); log('WebSerial connected.'); }catch(err){ log('Connect failed: '+err); setConn(false); } } else { setConn(true); log('Simulator ready.'); } }
+async function send(cmd,payload,note=''){ const p=payload||u8(); const buf=new Uint8Array(3+p.length+1); buf[0]=HDR; buf[1]=cmd; buf[2]=p.length; buf.set(p,3); buf[3+p.length]=TAIL; if(transportMode==='webserial' && writer){ try{ await writer.write(buf); }catch(err){ log('Write failed: '+err); } } log(`TX ${note}
+  ${hex(buf)}`); }
+
+// ====== device commands ======
+async function setPumpDuty(val){ const limit=parseInt(document.getElementById('dutyLimit').textContent)||240; const v=Math.max(0,Math.min(limit, val|0)); await send(CMD.PUMP_DUTY, u8(v), 'pump duty'); }
+async function setPumpFreq(hz){ const clamped=Math.max(100,Math.min(30000, hz|0)); await send(CMD.PUMP_FREQ, le16(clamped), 'pump freq'); }
+async function relayMask(mask){ mask >>>= 0; await send(CMD.RELAY_MASK, le32(mask), 'relay mask'); showOn(mask); pulseTick(mask); }
+async function relayAll(state){ await send(CMD.RELAY_ALL, u8(state?1:0), 'relay all'); if(!state) showOn(0); }
+
+// ====== sequencer ======
+let runner=null; // {abort,timers:[],label}
+function stopRunner(){ if(runner){ runner.abort=true; for(const t of runner.timers) clearTimeout(t); runner=null; relayMask(0); highlight([]); setMode('IDLE'); log('STOP'); } }
+window.addEventListener('keydown',e=>{ if(e.key==='Escape') stopRunner(); });
+function chansToMask(chs){ let m=0; for(const ch of chs){ m |= (1<<ch); } return m>>>0; }
+function setMode(s){ document.getElementById('modeLbl').textContent=s; }
+function runSteps(stepList, vf, lp, loops, label){
+  stopRunner(); setMode(label); document.getElementById('bwLbl').textContent=String((label.startsWith('SCAN')?document.getElementById('scanWidth').value:1));
+  const SAFE_VF=10, SAFE_LP=5; if(vf>SAFE_VF||lp>SAFE_LP) log(`WARN: vf>${SAFE_VF} or lp>${SAFE_LP} may cause jitter or overdrive.`);
+  runner={abort:false,timers:[],label}; const nSteps=stepList.length; if(lp<=0){ log('lp must be > 0'); return; }
+  const stepTime=1.0/(lp*nSteps); let loopCount=0; let t=0; function sched(fn,dt){ const id=setTimeout(fn,dt*1000); runner.timers.push(id);} 
+  function scheduleOneSweep(){ for(let i=0;i<nSteps;i++){ const chs=stepList[i]; const mask=chansToMask(chs)||0; sched(()=>{ if(runner.abort) return; highlight(chs); document.getElementById('stepLbl').textContent=`${i+1}/${nSteps}`; }, t); if(vf===0){ sched(()=>{ if(runner.abort) return; relayMask(mask); }, t); sched(()=>{ if(runner.abort) return; relayMask(0); }, t+stepTime); } else { const half=stepTime/(2*vf); for(let k=0;k<vf;k++){ sched(()=>{ if(runner.abort) return; relayMask(mask); }, t + k*2*half); sched(()=>{ if(runner.abort) return; relayMask(0); }, t + (k*2+1)*half); } } t+=stepTime; } }
+  function loopBody(){ if(runner.abort) return; t=0; scheduleOneSweep(); loopCount++; const duration=nSteps*stepTime; if(loops>0 && loopCount>=loops){ sched(()=>{ stopRunner(); }, duration+0.001);} else { sched(loopBody, duration);} }
+  log(`START ${label} | vf=${vf} lp=${lp}Hz loops=${loops||'∞'} steps=${nSteps}`);
+  loopBody();
+}
+
+// ====== steps builders ======
+function uniqSteps(list){ return list.map(chs=>uniq(chs)); }
+function stepsForScan(dir,width){ width=Math.max(1,Math.min(5,width|0)); const steps=[]; if(dir==='lr'||dir==='rl'){ const cols=(dir==='lr')?[...Array(W).keys()]:[...Array(W).keys()].reverse(); for(const c of cols){ let chs=[]; for(let k=0;k<width;k++){ const cc=c+k; if(cc<W) chs=chs.concat(COL_STEPS[cc]); } steps.push(uniq(chs)); } } else { const rows=(dir==='ud')?[...Array(H).keys()]:[...Array(H).keys()].reverse(); for(const r of rows){ let chs=[]; for(let k=0;k<width;k++){ const rr=r+k; if(rr<H) chs=chs.concat(ROW_STEPS[rr]); } steps.push(uniq(chs)); } } return steps; }
+function expandByWidth(seeds,width){ if(width<=1) return uniq(seeds); const radius=width-1; const set=new Set(); for(const ch of seeds){ const [r0,c0]=CH2POS.get(ch); for(const [ch2,[r,c]] of CH2POS){ const d=Math.max(Math.abs(r-r0),Math.abs(c-c0)); if(d<=radius) set.add(ch2); } } return Array.from(set); }
+function stepsForCircle(dir,outerOnly,len,width){ len=Math.max(1,Math.floor(len||1)); width=Math.max(1,Math.floor(width||1)); const order = outerOnly ? (dir==='cw'?CW_HULL:CCW_HULL) : (dir==='cw'?CW_ORDER:CCW_ORDER); const n=order.length; const steps=[]; for(let i=0;i<n;i++){ const seeds=[]; for(let k=0;k<len;k++){ seeds.push(order[(i+k)%n]); } steps.push(expandByWidth(seeds,width)); } return steps; }
+function stepsForRipple(dir, band){ band=Math.max(1,Math.floor(band||1)); const n=RINGS.length; const idxs=(dir==='out')?[...Array(n).keys()]:[...Array(n).keys()].reverse(); const steps=[]; for(let t=0;t<idxs.length;t++){ const i=idxs[t]; let chs=[]; for(let k=0;k<band;k++){ const j=i+k; if(j>=0 && j<n) chs=chs.concat(RINGS[j]); } steps.push(uniq(chs)); } return steps; }
+
+// ====== jitter meter ======
+const jitterEl=document.getElementById('jitterNow'); let lastPulseT=null; const deltas=[]; const MAXP=200;
+function pulseTick(mask){ if(mask){ const now=performance.now(); if(lastPulseT!=null){ const dt=now-lastPulseT; deltas.push(dt); if(deltas.length>MAXP) deltas.shift(); const m=mean(deltas), s=std(deltas,m); jitterEl.textContent=`${m.toFixed(1)} ± ${s.toFixed(1)}`; } lastPulseT=now; } }
+function mean(a){ return a.length? a.reduce((x,y)=>x+y,0)/a.length : 0; }
+function std(a,m){ if(a.length<2) return 0; const v=a.reduce((x,y)=>x+(y-m)*(y-m),0)/(a.length-1); return Math.sqrt(v); }
+
+// ====== wire buttons ======
+function byId(id){ return document.getElementById(id); }
+byId('btnConnect').addEventListener('click',connect);
+const duty=byId('duty'), dutyVal=byId('dutyVal');
+const applyDutyLive = debounce(v=>setPumpDuty(parseInt(v)), 80);
+duty.addEventListener('input',()=>{ dutyVal.textContent=duty.value; applyDutyLive(duty.value); });
+byId('btnSetDuty').addEventListener('click',()=>setPumpDuty(parseInt(duty.value)));
+byId('btnSetPFreq').addEventListener('click',()=>setPumpFreq(parseInt(byId('pfreq').value)));
+function startScan(loops){ const dir=byId('scanDir').value; const vf=Math.max(0,Math.floor(readNum('scanVf'))); const lp=Math.max(0.01,readNum('scanLp')); const width=Math.max(1,Math.floor(readNum('scanWidth'))); if(lp<=0){ log('lp must be > 0'); return; } runSteps(stepsForScan(dir,width), vf, lp, loops??(Math.floor(readNum('scanLoops'))||0), `SCAN ${dir}`); }
+byId('btnStartScan').addEventListener('click',()=>startScan());
+byId('btnScanOnce').addEventListener('click',()=>startScan(1));
+byId('btnPresetScan').addEventListener('click',()=>{ byId('scanDir').value='lr'; byId('scanWidth').value=2; byId('scanVf').value=3; byId('scanLp').value=1.5; startScan(); });
+function startCircle(times){ const dir=byId('circleDir').value; const vf=Math.max(0,Math.floor(readNum('circleVf'))); const lp=Math.max(0.01,readNum('circleLp')); const outer=byId('outerOnly').checked; const len=Math.max(1,Math.floor(readNum('circleLen'))); const width=Math.max(1,Math.floor(readNum('circleWidth'))); if(lp<=0){ log('lp must be > 0'); return; } runSteps(stepsForCircle(dir,outer,len,width), vf, lp, times??(Math.floor(readNum('circleLoops'))||0), `CIRCLE ${dir}${outer?' (outer)':''} len=${len} width=${width}`); }
+byId('btnStartCircle').addEventListener('click',()=>startCircle());
+byId('btnCircleOnce').addEventListener('click',()=>startCircle(1));
+byId('btnPresetCircle').addEventListener('click',()=>{ byId('circleDir').value='cw'; byId('outerOnly').checked=true; byId('circleLen').value=2; byId('circleWidth').value=1; byId('circleVf').value=2; byId('circleLp').value=1.0; startCircle(); });
+byId('btnAllOff').addEventListener('click',()=>{ stopRunner(); relayAll(0); });
+byId('btnMaskOn').addEventListener('click',()=>relayMask(maskFromSelected()));
+byId('btnMaskBlink').addEventListener('click',async()=>{ const m=maskFromSelected(); if(!m){ log('No selection.'); return; } await relayMask(m); setTimeout(()=>relayMask(0),150); });
+byId('btnMaskClear').addEventListener('click',()=>{ selected.clear(); cellEls.forEach(el=>el.classList.remove('sel')); updateSelCount(); relayMask(0); });
+byId('btnLoadCfg').addEventListener('click',()=>{ try{ const m=JSON.parse(byId('cfgMatrix').value); if(Array.isArray(m)&&m.length>0&&Array.isArray(m[0])){ MATRIX=m; H=m.length; W=m[0].length; localStorage.setItem('haptic_matrix_v2', JSON.stringify(MATRIX)); rebuildMaps(); rebuildGrid(); log('Matrix loaded.'); } else { log('Invalid matrix.'); } }catch(e){ log('JSON parse error: '+e); } });
+byId('btnResetCfg').addEventListener('click',()=>{ MATRIX=JSON.parse(JSON.stringify(MATRIX_DEFAULT)); H=MATRIX.length; W=MATRIX[0].length; localStorage.removeItem('haptic_matrix_v2'); rebuildMaps(); rebuildGrid(); refreshCfgText(); log('Matrix reset to default.'); });
+byId('btnClear').addEventListener('click',()=>{ logEl.textContent=''; });
+byId('btnCopy').addEventListener('click',()=>{ navigator.clipboard.writeText(logEl.textContent||''); });
+byId('btnSave').addEventListener('click',()=>{ const blob=new Blob([logEl.textContent||''],{type:'text/plain'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='haptic_log.txt'; document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },0); });
+byId('btnStopTop').addEventListener('click',stopRunner);
+function maskFromSelected(){ let m=0; selected.forEach(ch=>{ m|=(1<<ch); }); return m>>>0; }
+const cfgEl=document.getElementById('cfgMatrix');
+function refreshCfgText(){ cfgEl.value=JSON.stringify(MATRIX,null,2); }
+try{ const saved=localStorage.getItem('haptic_matrix_v2'); if(saved){ const m=JSON.parse(saved); if(Array.isArray(m)&&m.length){ MATRIX=m; H=m.length; W=m[0].length; log('Loaded matrix from localStorage.'); } } }catch{}
+// Ripple buttons
+function startRipple(times){ const dir=byId('rippleDir').value; const band=Math.max(1,Math.floor(readNum('rippleBand'))); const vf=Math.max(0,Math.floor(readNum('rippleVf'))); const lp=Math.max(0.01,readNum('rippleLp')); if(lp<=0){ log('lp must be > 0'); return; } runSteps(stepsForRipple(dir, band), vf, lp, times??(Math.floor(readNum('rippleLoops'))||0), `RIPPLE ${dir} band=${band}`); }
+byId('btnStartRipple').addEventListener('click',()=>startRipple());
+byId('btnRippleOnce').addEventListener('click',()=>startRipple(1));
+
+// ====== initial build ======
+rebuildMaps(); rebuildGrid(); refreshCfgText(); setConn(true); log('Simulator ready. Choose WebSerial to talk to a real device later.');
+</script>
+</body>
+</html>
